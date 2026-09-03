@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// cache statuses, matching the ruby httpdisk gem
+// cache statuses
 const (
 	StatusError = "error"
 	StatusForce = "force"

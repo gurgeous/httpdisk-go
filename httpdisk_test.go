@@ -301,7 +301,7 @@ func TestHTTPDiskStatus(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, StatusMiss, status.Status)
 	assert.Equal(t, "GET http://httpbingo.org/get", status.Key)
-	assert.Equal(t, md5String(status.Key), status.Digest)
+	assert.Equal(t, sha256String(status.Key), status.Digest)
 
 	// 2. hit
 	MustWrite(t, status.Path, "# GET http://httpbingo.org/get\nHTTPDISK 200 OK\n\nhello")

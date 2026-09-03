@@ -52,21 +52,6 @@ func TestPayloadRoundTrip(t *testing.T) {
 	assert.Nil(t, got.Body)
 }
 
-// This is the format used by the ruby httpdisk gem.
-func TestPayloadReadRuby(t *testing.T) {
-	data := "# GET http://www.google.com\nHTTPDISK 200 OK\ndate: Mon, 19 Apr 2021 18:40:01 GMT\nexpires: -1\n\n<html>"
-
-	payload, err := ReadPayload(strings.NewReader(data), false)
-	assert.Nil(t, err)
-	assert.Equal(t, "GET http://www.google.com", payload.Comment)
-	assert.Equal(t, 200, payload.Status)
-	assert.Equal(t, "OK", payload.Reason)
-	assert.Equal(t, "Mon, 19 Apr 2021 18:40:01 GMT", payload.Header.Get("Date"))
-	assert.Equal(t, "-1", payload.Header.Get("Expires"))
-	assert.Equal(t, "<html>", string(payload.Body))
-	assert.False(t, payload.IsError())
-}
-
 func TestPayloadEmptyBody(t *testing.T) {
 	buf := &bytes.Buffer{}
 	assert.Nil(t, (&Payload{Status: 204, Reason: "No Content", Header: http.Header{}}).Write(buf))

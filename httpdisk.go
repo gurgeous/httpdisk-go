@@ -21,7 +21,7 @@ type HTTPDisk struct {
 
 // Options for creating a new HTTPDisk.
 type Options struct {
-	// Directory where the cache is stored. Defaults to ~/httpdisk.
+	// Directory where the cache is stored. Defaults to ~/httpdisk-go.
 	Dir string
 
 	// If true, gzip cache files as we write them. Defaults to false. Note that
@@ -40,8 +40,7 @@ type Options struct {
 	// Don't read errors from cache (but still write)
 	ForceErrors bool
 
-	// Query and form params to ignore when calculating cache keys. Defaults to
-	// DefaultIgnoreParams. Set to an empty (non-nil) slice to disable.
+	// Query and form params to ignore when calculating cache keys.
 	IgnoreParams []string
 
 	// Optional logger. If nil and HTTPDISK_DEBUG is set, we log to stderr.
@@ -65,10 +64,7 @@ func NewHTTPDisk(options Options) *HTTPDisk {
 		if err != nil {
 			home = "."
 		}
-		options.Dir = filepath.Join(home, "httpdisk")
-	}
-	if options.IgnoreParams == nil {
-		options.IgnoreParams = DefaultIgnoreParams
+		options.Dir = filepath.Join(home, "httpdisk-go")
 	}
 	if options.Logger == nil && os.Getenv("HTTPDISK_DEBUG") != "" {
 		options.Logger = log.New(os.Stderr, "httpdisk: ", 0)

@@ -30,12 +30,11 @@ linters:
   exclusions:
     generated: lax
     presets: [comments, common-false-positives, std-error-handling]
-    rules:
+
   settings:
     exhaustive:
       default-signifies-exhaustive: true # default switch works even if some enums not present
-    gosec:
-      {
+    gosec: {
         confidence: low,
         severity: low,
         # md5 is not a security choice here, it's the ruby httpdisk cache key

@@ -12,129 +12,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// These come from the ruby httpdisk gem, and must not change. See README.
-func TestCacheKeyRubyParity(t *testing.T) {
-	tests := []struct {
-		method  string
-		url     string
-		body    string
-		hasBody bool
-		form    bool
-		ignore  []string
-		key     string
-		digest  string
-	}{
-		{
-			method: "GET", url: "http://google.com/?q=ruby",
-			key: "GET http://google.com?q=ruby", digest: "0e37f96800a55958fa6029283c78f672",
-		},
-		{
-			method: "GET", url: "http://a.com",
-			key: "GET http://a.com", digest: "e1ed291c6e286d34a4476f11c026d507",
-		},
-		{
-			method: "GET", url: "http://a.com/",
-			key: "GET http://a.com", digest: "e1ed291c6e286d34a4476f11c026d507",
-		},
-		{
-			method: "GET", url: "https://a.com/",
-			key: "GET https://a.com", digest: "be7d2235dc0faefadb642fa683edd654",
-		},
-		{
-			method: "GET", url: "http://A.COM:80/",
-			key: "GET http://a.com", digest: "e1ed291c6e286d34a4476f11c026d507",
-		},
-		{
-			method: "GET", url: "http://a.com:8080/",
-			key: "GET http://a.com:8080", digest: "65050b3b12e888ef46dec44ab31335ba",
-		},
-		{
-			method: "GET", url: "https://a.com:443/x",
-			key: "GET https://a.com/x", digest: "fde7b9c0bcfb21814dd2262ab4a3d01f",
-		},
-		{
-			method: "GET", url: "http://a.com?a=1&a=2&b=2&c=3",
-			key: "GET http://a.com?a=1&a=2&b=2&c=3", digest: "52f99f69786c8b4c7689daeaac9f67a0",
-		},
-		{
-			method: "GET", url: "http://a.com?c=3&b=2&a=2&a=1",
-			key: "GET http://a.com?a=1&a=2&b=2&c=3", digest: "52f99f69786c8b4c7689daeaac9f67a0",
-		},
-		{
-			method: "GET", url: "http://a.com?",
-			key: "GET http://a.com", digest: "e1ed291c6e286d34a4476f11c026d507",
-		},
-		{
-			method: "GET", url: "http://a.com/path%20x?y=a%20b",
-			key: "GET http://a.com/path%20x?y=a%20b", digest: "eff8f67de764702abd91edaac8957d5d",
-		},
-		{
-			method: "GET", url: "http://www.a~~.com/",
-			key: "GET http://www.a~~.com", digest: "40c5a24b6fc6ba85c4f030e8989b8f6f",
-		},
-		{
-			method: "GET", url: "http://a.com/x?api_key=secret&q=1", ignore: []string{"api_key"},
-			key: "GET http://a.com/x?q=1", digest: "95912b49b2691c503090d460b4344c0c",
-		},
-		{
-			method: "GET", url: "http://a.com/x?api_key=secret", ignore: []string{"api_key"},
-			key: "GET http://a.com/x", digest: "369607115d4a1efec05ed1ce81e711cb",
-		},
-		{
-			method: "HEAD", url: "http://a.com",
-			key: "HEAD http://a.com", digest: "272597ee879e4a48e977af365a092895",
-		},
-		{
-			method: "POST", url: "http://a.com", body: "abc", hasBody: true,
-			key: "POST http://a.com abc", digest: "b423e6a05f91991e9dd6a69fea9010cf",
-		},
-		{
-			method: "POST", url: "http://a.com", body: "", hasBody: true,
-			key: "POST http://a.com ", digest: "a42a5924abe54eeee86dd1b6c16c996c",
-		},
-		{
-			method: "POST", url: "http://a.com", body: "b=2&a=1", hasBody: true, form: true,
-			key: "POST http://a.com a=1&b=2", digest: "65fc0e2036b0b62c98b3cf5451ee74be",
-		},
-		{
-			method: "POST", url: "http://a.com", body: "a=1&api_key=x", hasBody: true, form: true, ignore: []string{"api_key"},
-			key: "POST http://a.com a=1", digest: "7074f387176a2658d948e1c050530ee2",
-		},
-		{
-			method: "POST", url: "http://a.com", body: strings.Repeat("x", 60), hasBody: true,
-			key: "POST http://a.com 1198000c11968f9368e02d6da57ec147", digest: "46280a92dc14a2158a627da4ce4db6cd",
-		},
-		{
-			method: "POST", url: "http://a.com", body: strings.Repeat("x", 49), hasBody: true,
-			key: fmt.Sprintf("POST http://a.com %s", strings.Repeat("x", 49)), digest: "0ef1ae07891d71a3aee90205f255e853",
-		},
-	}
-
-	for _, test := range tests {
-		var req *http.Request
-		var err error
-		if test.hasBody {
-			req, err = http.NewRequest(test.method, test.url, strings.NewReader(test.body))
-		} else {
-			req, err = http.NewRequest(test.method, test.url, nil)
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		if test.form {
-			req.Header.Set("Content-Type", formContentType)
-		}
-
-		ck := MustCacheKey(req, test.ignore...)
-		assert.Equal(t, test.key, ck.Key(), "key for %s %s", test.method, test.url)
-		assert.Equal(t, test.digest, ck.Digest(), "digest for %s %s", test.method, test.url)
-	}
-}
-
-// Diskpath must match the ruby httpdisk gem too.
+// Diskpath calculation.
 func TestCacheKeyDiskpath(t *testing.T) {
-	ck := MustCacheKey(MustRequest("GET", "http://google.com/?q=ruby"))
-	expected := filepath.Join("google.com", "0e3", "7f96800a55958fa6029283c78f672")
+	ck := MustCacheKey(MustRequest("GET", "http://google.com/?q=test"))
+	digest := ck.Digest()
+	assert.Equal(t, "3e0e77d99dbe211fe16fa8e4916a2ac14484f492b0ecce7f360f5294af52885d", digest)
+	expected := filepath.Join("google.com", digest[:3], digest[3:])
 	assert.Equal(t, expected, ck.Diskpath())
 }
 
@@ -189,17 +72,17 @@ func TestCacheKeyIgnoreParams(t *testing.T) {
 	// escaped param names are matched
 	assert.Equal(t, "GET http://a.com/x", key("http://a.com/x?a+b=1", "a b"))
 
-	// DefaultIgnoreParams is used by NewHTTPDisk, not by NewCacheKey
+	// no ignore params by default
 	hd := NewHTTPDisk(Options{Dir: t.TempDir()})
 	ck, err := hd.cacheKey(MustRequest("GET", "http://a.com/x?api_key=secret&q=1"))
 	assert.Nil(t, err)
-	assert.Equal(t, "GET http://a.com/x?q=1", ck.Key())
+	assert.Equal(t, "GET http://a.com/x?api_key=secret&q=1", ck.Key())
 
-	// ...and can be disabled with an empty slice
-	hd = NewHTTPDisk(Options{Dir: t.TempDir(), IgnoreParams: []string{}})
+	// suggested ignore params are opt-in
+	hd = NewHTTPDisk(Options{Dir: t.TempDir(), IgnoreParams: DefaultIgnoreParams})
 	ck, err = hd.cacheKey(MustRequest("GET", "http://a.com/x?api_key=secret&q=1"))
 	assert.Nil(t, err)
-	assert.Equal(t, "GET http://a.com/x?api_key=secret&q=1", ck.Key())
+	assert.Equal(t, "GET http://a.com/x?q=1", ck.Key())
 }
 
 func TestCacheKeyErrors(t *testing.T) {

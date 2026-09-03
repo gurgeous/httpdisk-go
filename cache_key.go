@@ -1,7 +1,7 @@
 package httpdisk
 
 import (
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -13,10 +13,8 @@ import (
 	"strings"
 )
 
-// DefaultIgnoreParams are query/form params that are dropped when calculating
-// cache keys. These typically vary from request to request, which would
-// otherwise fragment the cache. Set Options.IgnoreParams to override, or to an
-// empty (non-nil) slice to disable.
+// DefaultIgnoreParams are suggested query/form params to ignore when
+// calculating cache keys.
 var DefaultIgnoreParams = []string{
 	"_",
 	"access_token",
@@ -83,9 +81,9 @@ func (cacheKey *CacheKey) Key() string {
 	return strings.Join(key, "")
 }
 
-// Digest returns the md5 sum for this request.
+// Digest returns the SHA-256 sum for this request.
 func (cacheKey *CacheKey) Digest() string {
-	return md5String(cacheKey.Key())
+	return sha256String(cacheKey.Key())
 }
 
 // Diskpath returns the relative path on disk for this request.
@@ -128,14 +126,13 @@ func (cacheKey *CacheKey) bodykey() (string, bool) {
 		return body, body != ""
 	}
 	if len(body) >= maxBodyLen {
-		return md5String(body), true
+		return sha256String(body), true
 	}
 	return body, true
 }
 
-// Sort query params and drop the ones we've been asked to ignore. Note that we
-// sort the raw "key=value" strings without decoding them, to match the ruby
-// httpdisk gem.
+// Sort query params and drop the ones we've been asked to ignore. We sort the
+// raw "key=value" strings without decoding them.
 func (cacheKey *CacheKey) canonicalQuery(query string) string {
 	if query == "" {
 		return ""
@@ -169,7 +166,7 @@ var (
 )
 
 // Calculate a nice directory name from the hostname. Collisions are ok because
-// the rest of the path is an md5 checksum.
+// the rest of the path is a checksum.
 func hostdir(host string) string {
 	host = strings.ToLower(host)
 	host = hostWwwRe.ReplaceAllString(host, "")
@@ -181,7 +178,7 @@ func hostdir(host string) string {
 	return host
 }
 
-func md5String(text string) string {
-	hash := md5.Sum([]byte(text))
+func sha256String(text string) string {
+	hash := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(hash[:])
 }

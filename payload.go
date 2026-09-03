@@ -12,12 +12,10 @@ import (
 	"strings"
 )
 
-// ErrorStatus is the fake http status used for cached network errors, matching
-// the ruby httpdisk gem.
+// ErrorStatus is the fake http status used for cached network errors.
 const ErrorStatus = 999
 
-// Payload is a cached response, in the same on disk format used by the ruby
-// httpdisk gem:
+// Payload is a cached response:
 //
 //	# GET http://example.com/
 //	HTTPDISK 200 OK

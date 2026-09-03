@@ -17,7 +17,7 @@
 - Keep comments brief and useful
 - If a file has several one-liners, group them under `// one-liners` at bottom
 - Fail fast; prefer clear errors and actionable hints
-- Small Go library, not a framework or service. There is no CLI
+- Small Go library with a minimal cache CLI, not a framework or service
 
 ## Tests
 

@@ -3,6 +3,7 @@ module github.com/gurgeous/httpdisk-go
 go 1.27
 
 require (
+	github.com/alecthomas/kong v1.16.1
 	github.com/stretchr/testify v1.11.1
 	gopkg.in/dnaeon/go-vcr.v4 v4.0.7
 )

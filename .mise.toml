@@ -2,3 +2,6 @@
 golang = "1.27"
 golangci-lint = "latest"
 just = "latest"
+
+[env]
+_.path = "tmp/bin"

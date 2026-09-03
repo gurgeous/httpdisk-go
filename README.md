@@ -19,6 +19,15 @@ Responses will be cached in `~/httpdisk-go`. The cache key is the SHA-256 sum of
 
 Note that HTTP headers are NOT used to calculate the cache key. This can be unintuitive for crawling projects that involve cookies or session state.
 
+### CLI
+
+```sh
+httpdisk-go example.com
+httpdisk-go --status example.com
+```
+
+The first command fetches and prints the body. The second only inspects the cache.
+
 ### Options
 
 | Option         | Description                                                                                                                                       |
@@ -74,7 +83,7 @@ Here are some other excellent caching libraries that you might want to check out
 
 #### Sep 2026
 
-- Modernized, removed CLIs
+- Modernized, added fetch/status CLI
 - Added gzip and other options
 - Moved cache to `~/httpdisk-go`
 - Switched cache keys to sha (legacy was md5)

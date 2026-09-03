@@ -14,6 +14,21 @@ fmt:
 lint:
   golangci-lint run
 
+#
+# bin
+#
+
+build:
+  mkdir -p tmp/bin
+  go build -o tmp/bin/httpdisk-go ./cmd/httpdisk-go
+
+install: build
+  cp tmp/bin/httpdisk-go ~/.local/bin/httpdisk-go
+
+#
+# test
+#
+
 test *ARGS:
   go test ./... {{ARGS}}
   just banner "✓ test ✓"

@@ -1,10 +1,11 @@
-package gohttpdisk
+package httpdisk
 
 import (
-	"crypto/md5"
+	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -13,132 +14,199 @@ import (
 	"strings"
 )
 
+// DefaultIgnoreParams are suggested query/form params to ignore when
+// calculating cache keys.
+var DefaultIgnoreParams = []string{
+	"_",
+	"access_token",
+	"api_key",
+	"apikey",
+	"auth_token",
+	"key",
+	"nonce",
+	"sig",
+	"signature",
+	"timestamp",
+	"token",
+}
+
+// bodies at least this long are hashed instead of being included verbatim
+const maxBodyLen = 50
+
+const formContentType = "application/x-www-form-urlencoded"
+
 // a key in the cache
 type CacheKey struct {
 	Request *http.Request
+
+	// query params to ignore when calculating the key
+	IgnoreParams []string
+
+	body    string
+	hasBody bool
 }
 
-func NewCacheKey(req *http.Request) (*CacheKey, error) {
+func NewCacheKey(req *http.Request, ignoreParams []string) (*CacheKey, error) {
 	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
 		return nil, fmt.Errorf("http/https required (%s)", req.URL.String())
 	}
 	if req.URL.Host == "" {
 		return nil, fmt.Errorf("host required (%s)", req.URL.String())
 	}
-	return &CacheKey{req}, nil
+	cacheKey := &CacheKey{Request: req, IgnoreParams: ignoreParams}
+	if err := cacheKey.readBody(); err != nil {
+		return nil, err
+	}
+	return cacheKey, nil
 }
 
 // Key calculates a canonical cache key for the request based on the http
 // method, the normalized URL, and the request body if present. The key can be
 // quite long since it contains the request body.
 func (cacheKey *CacheKey) Key() string {
-	method := strings.ToUpper(cacheKey.Request.Method)
+	req := cacheKey.Request
+
+	method := strings.ToUpper(req.Method)
 	if method == "" {
 		method = "GET"
 	}
+	scheme := strings.ToLower(req.URL.Scheme)
 
-	scheme := strings.ToLower(cacheKey.Request.URL.Scheme)
-	port := cacheKey.Request.URL.Port()
-	if port == "" {
-		port = ports[scheme]
+	key := []string{method, " ", scheme, "://", strings.ToLower(req.URL.Hostname())}
+	if port := req.URL.Port(); port != "" && port != defaultPorts[scheme] {
+		key = append(key, ":", port)
 	}
-
-	path := cacheKey.Request.URL.Path
-	if path == "" {
-		path = "/"
-	}
-
-	key := make([]string, 12)
-	key = append(key, method)
-	key = append(key, " ")
-	key = append(key, scheme)
-	key = append(key, "://")
-	key = append(key, strings.ToLower(cacheKey.Request.URL.Hostname()))
-	if port != ports[scheme] {
-		key = append(key, ":")
-		key = append(key, port)
-	}
-	if path != "/" {
+	if path := req.URL.EscapedPath(); path != "" && path != "/" {
 		key = append(key, path)
 	}
-	if query := cacheKey.Request.URL.Query(); len(query) > 0 {
-		key = append(key, "?")
-		key = append(key, querykey(query))
+	if query := cacheKey.canonicalQuery(req.URL.RawQuery); query != "" {
+		key = append(key, "?", query)
 	}
-	if cacheKey.Request.GetBody != nil {
-		key = append(key, " ")
-		key = append(key, bodykey(cacheKey.Request))
+	if body, ok := cacheKey.bodykey(); ok {
+		key = append(key, " ", body)
 	}
 
 	return strings.Join(key, "")
 }
 
-// Digest returns the md5 sum for this request.
+// Digest returns the SHA-256 sum for this request.
 func (cacheKey *CacheKey) Digest() string {
-	return md5String(cacheKey.Key())
+	return sha256String(cacheKey.Key())
 }
 
-// Path returns the path on disk for this request.
-func (cacheKey *CacheKey) Diskpath(noHosts bool) string {
-	paths := []string{}
-
-	if !noHosts {
-		// Host dir
-		paths = append(paths, normalizeHostForPath(cacheKey.Request.URL.Hostname()))
-	}
-
-	// Key
-	key := cacheKey.Digest()
-	paths = append(paths, key[0:2])
-	paths = append(paths, key[2:4])
-	paths = append(paths, key[4:])
-
-	return filepath.Join(paths...)
+// Diskpath returns the relative path on disk for this request.
+func (cacheKey *CacheKey) Diskpath() string {
+	digest := cacheKey.Digest()
+	return filepath.Join(hostdir(cacheKey.Request.URL.Hostname()), digest[0:3], digest[3:])
 }
 
 //
 // helpers
 //
 
-var ports = map[string]string{
+var defaultPorts = map[string]string{
 	"http":  "80",
 	"https": "443",
 }
 
-func querykey(query url.Values) string {
-	for key := range query {
-		sort.Strings(query[key])
+// Calculate the cache key segment for the request body. Form bodies are
+// canonicalized, long bodies are hashed. The bool is false if this request
+// has no body at all.
+func (cacheKey *CacheKey) bodykey() (string, bool) {
+	req := cacheKey.Request
+	if !cacheKey.hasBody {
+		return "", false
 	}
-	return query.Encode() // note: sorts by key
+	body := cacheKey.body
+
+	if req.Header.Get("Content-Type") == formContentType {
+		// canonicalized away to nothing? then there's no body segment
+		body = cacheKey.canonicalQuery(body)
+		return body, body != ""
+	}
+	if len(body) >= maxBodyLen {
+		return sha256String(body), true
+	}
+	return body, true
 }
 
-func bodykey(req *http.Request) string {
-	reader, err := req.GetBody()
-	if err != nil {
+// Sort query params and drop the ones we've been asked to ignore. We sort the
+// raw "key=value" strings without decoding them.
+func (cacheKey *CacheKey) canonicalQuery(query string) string {
+	if query == "" {
 		return ""
 	}
-	defer reader.Close()
-	data, err := ioutil.ReadAll(reader)
-	if err != nil {
-		return ""
+
+	parts := strings.Split(query, "&")
+	sort.Strings(parts)
+
+	if len(cacheKey.IgnoreParams) > 0 {
+		ignore := map[string]bool{}
+		for _, param := range cacheKey.IgnoreParams {
+			ignore[url.QueryEscape(param)] = true
+		}
+		kept := parts[:0]
+		for _, part := range parts {
+			name, _, _ := strings.Cut(part, "=")
+			if !ignore[name] {
+				kept = append(kept, part)
+			}
+		}
+		parts = kept
 	}
-	return string(data)
+
+	return strings.Join(parts, "&")
 }
 
 var (
-	hostWwwRe   = regexp.MustCompile(`^(www\.)`)
-	hostCharsRe = regexp.MustCompile("[^A-Za-z0-9._-]+")
+	hostCharsRe = regexp.MustCompile(`[^a-z0-9._-]+`)
+	hostDotsRe  = regexp.MustCompile(`\.{2,}`)
 )
 
-// Normalize a hostname. Collisions are ok because the rest of the path is an
-// md5 checksum.
-func normalizeHostForPath(s string) string {
-	s = hostWwwRe.ReplaceAllString(s, "")
-	s = hostCharsRe.ReplaceAllString(s, "")
-	return s
+// Calculate a nice directory name from the hostname. Collisions are ok because
+// the rest of the path is a checksum.
+func hostdir(host string) string {
+	host = strings.ToLower(host)
+	host = strings.TrimPrefix(host, "www.")
+	host = hostCharsRe.ReplaceAllString(host, "")
+	host = hostDotsRe.ReplaceAllString(host, ".")
+	if host == "" {
+		host = "any"
+	}
+	return host
 }
 
-func md5String(text string) string {
-	hash := md5.Sum([]byte(text))
+func (cacheKey *CacheKey) readBody() error {
+	req := cacheKey.Request
+	if req.GetBody != nil {
+		body, err := req.GetBody()
+		if err != nil {
+			return fmt.Errorf("get request body: %w", err)
+		}
+		defer body.Close()
+
+		data, err := io.ReadAll(body)
+		if err != nil {
+			return fmt.Errorf("read request body: %w", err)
+		}
+		cacheKey.body, cacheKey.hasBody = string(data), true
+		return nil
+	}
+	if req.Body == nil || req.Body == http.NoBody {
+		return nil
+	}
+
+	data, err := io.ReadAll(req.Body)
+	_ = req.Body.Close()
+	if err != nil {
+		return fmt.Errorf("read request body: %w", err)
+	}
+	req.Body = io.NopCloser(bytes.NewReader(data))
+	cacheKey.body, cacheKey.hasBody = string(data), true
+	return nil
+}
+
+func sha256String(text string) string {
+	hash := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(hash[:])
 }

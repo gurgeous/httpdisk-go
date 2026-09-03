@@ -126,6 +126,17 @@ func TestPayloadResponse(t *testing.T) {
 	body, err := io.ReadAll(resp.Body)
 	assert.Nil(t, err)
 	assert.Equal(t, "hello", string(body))
+	assert.Nil(t, resp.Body.Close())
+
+	// preserve declared lengths, including HEAD responses with no body
+	payload = &Payload{
+		Status: 200,
+		Reason: "OK",
+		Header: http.Header{"Content-Length": []string{"123"}},
+	}
+	resp = payload.Response(MustRequest("HEAD", "http://a.com"))
+	assert.Equal(t, int64(123), resp.ContentLength)
+	assert.Nil(t, resp.Body.Close())
 }
 
 func TestPayloadInvalid(t *testing.T) {

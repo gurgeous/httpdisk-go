@@ -30,19 +30,16 @@ linters:
   exclusions:
     generated: lax
     presets: [comments, common-false-positives, std-error-handling]
+    rules:
+      - path: _test\.go
+        linters: [goconst]
 
   settings:
     exhaustive:
       default-signifies-exhaustive: true # default switch works even if some enums not present
-    gosec: {
-        confidence: low,
-        severity: low,
-        # md5 is not a security choice here, it's the ruby httpdisk cache key
-        excludes: [G301, G306, G401, G501],
-      }
+    gosec: { confidence: low, severity: low, excludes: [G301] }
 
 issues: { max-issues-per-linter: 0, max-same-issues: 0 }
 formatters:
   enable: [gofumpt, goimports]
   exclusions: { generated: lax }
-run: { tests: false } # don't run on test files

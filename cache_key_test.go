@@ -1,7 +1,9 @@
 package httpdisk
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -49,6 +51,63 @@ func TestCacheKeys(t *testing.T) {
 	req1, _ := http.NewRequest("POST", "http://a.com", strings.NewReader("abc"))
 	req2, _ := http.NewRequest("POST", "http://a.com", strings.NewReader("def"))
 	assertDiffer(req1, req2)
+}
+
+func TestCacheKeyBodies(t *testing.T) {
+	// form bodies are sorted and filtered
+	req, err := http.NewRequest("POST", "http://a.com", strings.NewReader("token=x&b=2&a=1"))
+	assert.Nil(t, err)
+	req.Header.Set("Content-Type", formContentType)
+	ck, err := NewCacheKey(req, []string{"token"})
+	assert.Nil(t, err)
+	if assert.NotNil(t, ck) {
+		assert.Equal(t, "POST http://a.com a=1&b=2", ck.Key())
+	}
+	req, err = http.NewRequest("POST", "http://a.com", strings.NewReader("token=x"))
+	assert.Nil(t, err)
+	req.Header.Set("Content-Type", formContentType)
+	ck, err = NewCacheKey(req, []string{"token"})
+	assert.Nil(t, err)
+	if assert.NotNil(t, ck) {
+		assert.Equal(t, "POST http://a.com", ck.Key())
+	}
+
+	// long bodies are hashed
+	body := strings.Repeat("x", maxBodyLen)
+	req, err = http.NewRequest("POST", "http://a.com", strings.NewReader(body))
+	assert.Nil(t, err)
+	ck, err = NewCacheKey(req, nil)
+	assert.Nil(t, err)
+	if assert.NotNil(t, ck) {
+		assert.Equal(t, "POST http://a.com "+sha256String(body), ck.Key())
+	}
+
+	// arbitrary readers are keyed without consuming the network body
+	req, err = http.NewRequest("POST", "http://a.com", io.LimitReader(strings.NewReader("abc"), 3))
+	assert.Nil(t, err)
+	assert.Nil(t, req.GetBody)
+	ck, err = NewCacheKey(req, nil)
+	assert.Nil(t, err)
+	if assert.NotNil(t, ck) {
+		assert.Equal(t, "POST http://a.com abc", ck.Key())
+	}
+	got, err := io.ReadAll(req.Body)
+	assert.Nil(t, err)
+	assert.Equal(t, "abc", string(got))
+}
+
+func TestCacheKeyBodyErrors(t *testing.T) {
+	req := MustRequest("POST", "http://a.com")
+	req.GetBody = func() (io.ReadCloser, error) {
+		return nil, errors.New("get failed")
+	}
+	_, err := NewCacheKey(req, nil)
+	assert.ErrorContains(t, err, "get failed")
+
+	req, err = http.NewRequest("POST", "http://a.com", errorReader{})
+	assert.Nil(t, err)
+	_, err = NewCacheKey(req, nil)
+	assert.ErrorContains(t, err, "read failed")
 }
 
 func TestCacheKeyIgnoreParams(t *testing.T) {
@@ -111,3 +170,7 @@ func TestHostdir(t *testing.T) {
 	assert.Equal(t, "a.com", hostdir("a...com"))
 	assert.Equal(t, "any", hostdir("~~~"))
 }
+
+type errorReader struct{}
+
+func (errorReader) Read([]byte) (int, error) { return 0, errors.New("read failed") }

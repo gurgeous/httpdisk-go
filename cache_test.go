@@ -2,13 +2,18 @@ package httpdisk
 
 import (
 	"bytes"
+	"errors"
 	"net/http"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+var errNoSuchHost = errors.New("no such host")
 
 func newTestPayload(status int, body string) *Payload {
 	return &Payload{
@@ -81,6 +86,10 @@ func TestCacheStatus(t *testing.T) {
 	forced := newCache(Options{Dir: dir, Force: true})
 	status, _ = forced.Status(ck)
 	assert.Equal(t, StatusForce, status)
+	forced.Expires = time.Nanosecond
+	time.Sleep(2 * time.Millisecond)
+	status, _ = forced.Status(ck)
+	assert.Equal(t, StatusForce, status)
 
 	// stale
 	stale := newCache(Options{Dir: dir, Expires: 1 * time.Nanosecond})
@@ -102,6 +111,50 @@ func TestCacheStatus(t *testing.T) {
 	forceErrors := newCache(Options{Dir: dir, ForceErrors: true})
 	status, _ = forceErrors.Status(ck)
 	assert.Equal(t, StatusForce, status)
+}
+
+func TestCacheConcurrentSet(t *testing.T) {
+	c := newCache(Options{Dir: t.TempDir()})
+	ck := MustCacheKey(MustRequest("GET", "http://a.com/b"))
+
+	const writers = 8
+	bodies := map[string]bool{}
+	errs := make(chan error, writers)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range writers {
+		body := strings.Repeat(string(rune('a'+i)), 64*1024)
+		bodies[body] = true
+		wg.Go(func() {
+			<-start
+			errs <- c.Set(ck, newTestPayload(200, body))
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		assert.Nil(t, err)
+	}
+	payload, status, err := c.Get(ck)
+	assert.Nil(t, err)
+	assert.Equal(t, StatusHit, status)
+	if assert.NotNil(t, payload) {
+		assert.True(t, bodies[string(payload.Body)])
+	}
+}
+
+func TestCacheStatError(t *testing.T) {
+	dir := t.TempDir()
+	file := dir + "/file"
+	MustWrite(t, file, "not a directory")
+	c := newCache(Options{Dir: file})
+	ck := MustCacheKey(MustRequest("GET", "http://a.com/b"))
+
+	_, status, err := c.Get(ck)
+	assert.Equal(t, StatusMiss, status)
+	assert.NotNil(t, err)
 }
 
 func TestCacheAge(t *testing.T) {

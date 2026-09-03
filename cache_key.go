@@ -1,6 +1,7 @@
 package httpdisk
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -40,6 +41,9 @@ type CacheKey struct {
 
 	// query params to ignore when calculating the key
 	IgnoreParams []string
+
+	body    string
+	hasBody bool
 }
 
 func NewCacheKey(req *http.Request, ignoreParams []string) (*CacheKey, error) {
@@ -49,7 +53,11 @@ func NewCacheKey(req *http.Request, ignoreParams []string) (*CacheKey, error) {
 	if req.URL.Host == "" {
 		return nil, fmt.Errorf("host required (%s)", req.URL.String())
 	}
-	return &CacheKey{Request: req, IgnoreParams: ignoreParams}, nil
+	cacheKey := &CacheKey{Request: req, IgnoreParams: ignoreParams}
+	if err := cacheKey.readBody(); err != nil {
+		return nil, err
+	}
+	return cacheKey, nil
 }
 
 // Key calculates a canonical cache key for the request based on the http
@@ -106,19 +114,10 @@ var defaultPorts = map[string]string{
 // has no body at all.
 func (cacheKey *CacheKey) bodykey() (string, bool) {
 	req := cacheKey.Request
-	if req.GetBody == nil {
+	if !cacheKey.hasBody {
 		return "", false
 	}
-	reader, err := req.GetBody()
-	if err != nil {
-		return "", false
-	}
-	defer reader.Close()
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		return "", false
-	}
-	body := string(data)
+	body := cacheKey.body
 
 	if req.Header.Get("Content-Type") == formContentType {
 		// canonicalized away to nothing? then there's no body segment
@@ -160,7 +159,6 @@ func (cacheKey *CacheKey) canonicalQuery(query string) string {
 }
 
 var (
-	hostWwwRe   = regexp.MustCompile(`^www\.`)
 	hostCharsRe = regexp.MustCompile(`[^a-z0-9._-]+`)
 	hostDotsRe  = regexp.MustCompile(`\.{2,}`)
 )
@@ -169,13 +167,43 @@ var (
 // the rest of the path is a checksum.
 func hostdir(host string) string {
 	host = strings.ToLower(host)
-	host = hostWwwRe.ReplaceAllString(host, "")
+	host = strings.TrimPrefix(host, "www.")
 	host = hostCharsRe.ReplaceAllString(host, "")
 	host = hostDotsRe.ReplaceAllString(host, ".")
 	if host == "" {
 		host = "any"
 	}
 	return host
+}
+
+func (cacheKey *CacheKey) readBody() error {
+	req := cacheKey.Request
+	if req.GetBody != nil {
+		body, err := req.GetBody()
+		if err != nil {
+			return fmt.Errorf("get request body: %w", err)
+		}
+		defer body.Close()
+
+		data, err := io.ReadAll(body)
+		if err != nil {
+			return fmt.Errorf("read request body: %w", err)
+		}
+		cacheKey.body, cacheKey.hasBody = string(data), true
+		return nil
+	}
+	if req.Body == nil || req.Body == http.NoBody {
+		return nil
+	}
+
+	data, err := io.ReadAll(req.Body)
+	_ = req.Body.Close()
+	if err != nil {
+		return fmt.Errorf("read request body: %w", err)
+	}
+	req.Body = io.NopCloser(bytes.NewReader(data))
+	cacheKey.body, cacheKey.hasBody = string(data), true
+	return nil
 }
 
 func sha256String(text string) string {

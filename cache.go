@@ -73,11 +73,11 @@ func (cache *Cache) Set(cacheKey *CacheKey, payload *Payload) error {
 	}
 
 	// write to tmp file in same directory
-	tmp := filepath.Join(filepath.Dir(diskpath), fmt.Sprintf(".tmp-%s", filepath.Base(diskpath)))
-	f, err := os.Create(tmp)
+	f, err := os.CreateTemp(filepath.Dir(diskpath), ".tmp-"+filepath.Base(diskpath)+"-")
 	if err != nil {
 		return err
 	}
+	tmp := f.Name()
 	defer os.Remove(tmp)
 
 	if err := cache.writePayload(f, payload); err != nil {
@@ -125,24 +125,30 @@ func (cache *Cache) get(cacheKey *CacheKey, peek bool) (*Payload, string, error)
 
 	stat, err := os.Stat(path)
 	if err != nil {
-		return nil, StatusMiss, nil
-	}
-	if cache.expired(stat) {
-		return nil, StatusStale, nil
+		if os.IsNotExist(err) {
+			return nil, StatusMiss, nil
+		}
+		return nil, StatusMiss, fmt.Errorf("%s: %w", path, err)
 	}
 	if cache.Force {
 		return nil, StatusForce, nil
 	}
+	if cache.expired(stat) {
+		return nil, StatusStale, nil
+	}
 
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, StatusMiss, nil
+		if os.IsNotExist(err) {
+			return nil, StatusMiss, nil
+		}
+		return nil, StatusMiss, fmt.Errorf("%s: %w", path, err)
 	}
 	defer f.Close()
 
 	payload, err := readPayload(f, peek)
 	if err != nil {
-		return nil, StatusMiss, fmt.Errorf("%s: %s", path, err)
+		return nil, StatusMiss, fmt.Errorf("%s: %w", path, err)
 	}
 
 	if payload.IsError() {

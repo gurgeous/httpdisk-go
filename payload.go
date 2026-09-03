@@ -113,6 +113,13 @@ func PayloadFromError(err error) *Payload {
 
 // Response turns this payload back into an http.Response.
 func (payload *Payload) Response(req *http.Request) *http.Response {
+	contentLength := int64(len(payload.Body))
+	if value := payload.Header.Get("Content-Length"); value != "" {
+		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil {
+			contentLength = parsed
+		}
+	}
+
 	return &http.Response{
 		Status:        strings.TrimSpace(fmt.Sprintf("%d %s", payload.Status, payload.Reason)),
 		StatusCode:    payload.Status,
@@ -121,15 +128,18 @@ func (payload *Payload) Response(req *http.Request) *http.Response {
 		ProtoMinor:    1,
 		Header:        payload.Header,
 		Body:          io.NopCloser(bytes.NewReader(payload.Body)),
-		ContentLength: int64(len(payload.Body)),
+		ContentLength: contentLength,
 		Request:       req,
 	}
 }
 
 func (payload *Payload) Write(w io.Writer) error {
-	buf := &bytes.Buffer{}
-	fmt.Fprintf(buf, "# %s\n", oneline(payload.Comment))
-	fmt.Fprintf(buf, "HTTPDISK %d %s\n", payload.Status, oneline(payload.Reason))
+	if _, err := fmt.Fprintf(w, "# %s\n", oneline(payload.Comment)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "HTTPDISK %d %s\n", payload.Status, oneline(payload.Reason)); err != nil {
+		return err
+	}
 
 	keys := make([]string, 0, len(payload.Header))
 	for key := range payload.Header {
@@ -138,14 +148,19 @@ func (payload *Payload) Write(w io.Writer) error {
 	sort.Strings(keys)
 	for _, key := range keys {
 		for _, value := range payload.Header[key] {
-			fmt.Fprintf(buf, "%s: %s\n", key, oneline(value))
+			if _, err := fmt.Fprintf(w, "%s: %s\n", key, oneline(value)); err != nil {
+				return err
+			}
 		}
 	}
 
-	buf.WriteString("\n")
-	buf.Write(payload.Body)
-
-	_, err := w.Write(buf.Bytes())
+	if _, err := io.WriteString(w, "\n"); err != nil {
+		return err
+	}
+	n, err := w.Write(payload.Body)
+	if err == nil && n != len(payload.Body) {
+		return io.ErrShortWrite
+	}
 	return err
 }
 

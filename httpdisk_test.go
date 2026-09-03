@@ -16,8 +16,6 @@ import (
 	"gopkg.in/dnaeon/go-vcr.v4/pkg/recorder"
 )
 
-var errNoSuchHost = errors.New("no such host")
-
 func TestHTTPDisk(t *testing.T) {
 	client := setupClient(t, Options{})
 
@@ -96,25 +94,37 @@ func TestHTTPDiskErrors(t *testing.T) {
 	url := "http://httpbingo.org/status/404"
 	resp, err = client.Get(url)
 	assert.Nil(t, err)
-	assert.Equal(t, 404, resp.StatusCode)
-	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
+	if assert.NotNil(t, resp) {
+		assert.Equal(t, 404, resp.StatusCode)
+		assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
+		assert.Nil(t, resp.Body.Close())
+	}
 
 	resp, err = client.Get(url)
 	assert.Nil(t, err)
-	assert.Equal(t, 404, resp.StatusCode)
-	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"), "response not cached")
+	if assert.NotNil(t, resp) {
+		assert.Equal(t, 404, resp.StatusCode)
+		assert.Equal(t, "1", resp.Header.Get("X-Request-Id"), "response not cached")
+		assert.Nil(t, resp.Body.Close())
+	}
 
 	// 50x error
 	url = "http://httpbingo.org/status/502"
 	resp, err = client.Get(url)
 	assert.Nil(t, err)
-	assert.Equal(t, 502, resp.StatusCode)
-	assert.Equal(t, "2", resp.Header.Get("X-Request-Id"))
+	if assert.NotNil(t, resp) {
+		assert.Equal(t, 502, resp.StatusCode)
+		assert.Equal(t, "2", resp.Header.Get("X-Request-Id"))
+		assert.Nil(t, resp.Body.Close())
+	}
 
 	resp, err = client.Get(url)
 	assert.Nil(t, err)
-	assert.Equal(t, 502, resp.StatusCode)
-	assert.Equal(t, "2", resp.Header.Get("X-Request-Id"), "response not cached")
+	if assert.NotNil(t, resp) {
+		assert.Equal(t, 502, resp.StatusCode)
+		assert.Equal(t, "2", resp.Header.Get("X-Request-Id"), "response not cached")
+		assert.Nil(t, resp.Body.Close())
+	}
 }
 
 func TestHTTPDiskTimeout(t *testing.T) {
@@ -129,10 +139,10 @@ func TestHTTPDiskTimeout(t *testing.T) {
 	client := http.Client{Transport: hd, Timeout: 500 * time.Millisecond}
 
 	url := "http://httpbingo.org/delay/1"
-	_, err := client.Get(url)
+	err := getError(&client, url)
 	assert.NotNil(t, err)
 
-	_, err = client.Get(url)
+	err = getError(&client, url)
 	if assert.NotNil(t, err) {
 		assert.Contains(t, err.Error(), "(cached)", "%s error was not cached", url)
 	}
@@ -155,10 +165,10 @@ func TestHTTPDiskNoSuchHost(t *testing.T) {
 	client := http.Client{Transport: hd}
 
 	url := "http://bogus.bogus"
-	_, err := client.Get(url)
+	err := getError(&client, url)
 	assert.NotNil(t, err)
 
-	_, err = client.Get(url)
+	err = getError(&client, url)
 	if assert.NotNil(t, err) {
 		assert.Contains(t, err.Error(), "(cached)", "%s error was not cached", url)
 	}
@@ -172,7 +182,7 @@ func TestHTTPDiskUnknownError(t *testing.T) {
 	client := http.Client{Transport: hd}
 
 	url := "http://bogus.bogus"
-	_, err := client.Get(url)
+	err := getError(&client, url)
 	assert.NotNil(t, err)
 
 	status, err := hd.Status(MustRequest("GET", url))
@@ -192,25 +202,37 @@ func TestHTTPDiskForceErrors(t *testing.T) {
 	url := "http://httpbingo.org/status/404"
 	resp, err = client.Get(url)
 	assert.Nil(t, err)
-	assert.Equal(t, 404, resp.StatusCode)
-	assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
+	if assert.NotNil(t, resp) {
+		assert.Equal(t, 404, resp.StatusCode)
+		assert.Equal(t, "1", resp.Header.Get("X-Request-Id"))
+		assert.Nil(t, resp.Body.Close())
+	}
 
 	resp, err = client.Get(url)
 	assert.Nil(t, err)
-	assert.Equal(t, 404, resp.StatusCode)
-	assert.Equal(t, "2", resp.Header.Get("X-Request-Id"), "response cached")
+	if assert.NotNil(t, resp) {
+		assert.Equal(t, 404, resp.StatusCode)
+		assert.Equal(t, "2", resp.Header.Get("X-Request-Id"), "response cached")
+		assert.Nil(t, resp.Body.Close())
+	}
 
 	// 50x error
 	url = "http://httpbingo.org/status/502"
 	resp, err = client.Get(url)
 	assert.Nil(t, err)
-	assert.Equal(t, 502, resp.StatusCode)
-	assert.Equal(t, "3", resp.Header.Get("X-Request-Id"))
+	if assert.NotNil(t, resp) {
+		assert.Equal(t, 502, resp.StatusCode)
+		assert.Equal(t, "3", resp.Header.Get("X-Request-Id"))
+		assert.Nil(t, resp.Body.Close())
+	}
 
 	resp, err = client.Get(url)
 	assert.Nil(t, err)
-	assert.Equal(t, 502, resp.StatusCode)
-	assert.Equal(t, "4", resp.Header.Get("X-Request-Id"), "response cached")
+	if assert.NotNil(t, resp) {
+		assert.Equal(t, 502, resp.StatusCode)
+		assert.Equal(t, "4", resp.Header.Get("X-Request-Id"), "response cached")
+		assert.Nil(t, resp.Body.Close())
+	}
 }
 
 func TestHTTPDiskForceTimeout(t *testing.T) {
@@ -225,8 +247,8 @@ func TestHTTPDiskForceTimeout(t *testing.T) {
 	client := http.Client{Transport: hd, Timeout: 500 * time.Millisecond}
 
 	url := "http://httpbingo.org/delay/1"
-	client.Get(url)
-	_, err := client.Get(url)
+	assert.NotNil(t, getError(&client, url))
+	err := getError(&client, url)
 	if assert.NotNil(t, err) {
 		assert.NotContains(t, err.Error(), "(cached)", "%s ForceErrors not honored", url)
 	}
@@ -244,8 +266,8 @@ func TestHTTPDiskForceNoSuchHost(t *testing.T) {
 	client := http.Client{Transport: hd}
 
 	url := "http://bogus.bogus"
-	client.Get(url)
-	_, err := client.Get(url)
+	assert.NotNil(t, getError(&client, url))
+	err := getError(&client, url)
 	if assert.NotNil(t, err) {
 		assert.NotContains(t, err.Error(), "(cached)", "%s ForceErrors not honored", url)
 	}
@@ -351,8 +373,8 @@ func TestHTTPDiskLogging(t *testing.T) {
 	hd.Transport = &errorRoundTripper{"no such host"}
 
 	client := http.Client{Transport: hd}
-	client.Get("http://bogus.bogus/x")
-	client.Get("http://bogus.bogus/x")
+	assert.NotNil(t, getError(&client, "http://bogus.bogus/x"))
+	assert.NotNil(t, getError(&client, "http://bogus.bogus/x"))
 
 	assert.Contains(t, buf.String(), "GET http://bogus.bogus/x (miss)")
 	assert.Contains(t, buf.String(), "GET http://bogus.bogus/x (error)")
@@ -414,6 +436,14 @@ func newVCR(t *testing.T) *recorder.Recorder {
 
 type errorRoundTripper struct{ errorString string }
 
-func (t *errorRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+func (t *errorRoundTripper) RoundTrip(_ *http.Request) (*http.Response, error) {
 	return nil, errors.New(t.errorString)
+}
+
+func getError(client *http.Client, url string) error {
+	resp, err := client.Get(url)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	return err
 }

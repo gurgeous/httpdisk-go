@@ -1,7 +1,8 @@
 ---
-version: 1
+version: 2
 interactions:
-  - request:
+  - id: 0
+    request:
       body: ""
       form: {}
       headers: {}
@@ -12,6 +13,6 @@ interactions:
       headers:
         X-Request-Id:
           - "1"
-      status: 200 OK
+      status: "200 OK"
       code: 200
-      duration: ""
+      duration: 0

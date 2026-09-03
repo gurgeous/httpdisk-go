@@ -1,7 +1,8 @@
 ---
-version: 1
+version: 2
 interactions:
-  - request:
+  - id: 0
+    request:
       body: ""
       form: {}
       headers: {}
@@ -12,10 +13,11 @@ interactions:
       headers:
         X-Request-Id:
           - "1"
-      status: 404 Not Found
+      status: "404 Not Found"
       code: 404
-      duration: ""
-  - request:
+      duration: 0
+  - id: 1
+    request:
       body: ""
       form: {}
       headers: {}
@@ -26,6 +28,6 @@ interactions:
       headers:
         X-Request-Id:
           - "2"
-      status: 502 Bad Gateway
+      status: "502 Bad Gateway"
       code: 502
-      duration: ""
+      duration: 0

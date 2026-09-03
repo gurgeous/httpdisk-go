@@ -1,31 +1,33 @@
 ---
-version: 1
+version: 2
 interactions:
-  - request:
+  - id: 0
+    request:
       body: ""
       form: {}
       headers: {}
-      url: http://example.com/get
+      url: http://httpbingo.org/get
       method: GET
     response:
-      body: "body 1"
+      body: ""
       headers:
         X-Request-Id:
           - "1"
-      status: 200 OK
+      status: "200 OK"
       code: 200
-      duration: ""
-  - request:
+      duration: 0
+  - id: 1
+    request:
       body: ""
       form: {}
       headers: {}
-      url: http://example.com/get
+      url: http://httpbingo.org/get
       method: GET
     response:
-      body: "body 2"
+      body: ""
       headers:
         X-Request-Id:
           - "2"
-      status: 200 OK
+      status: "200 OK"
       code: 200
-      duration: ""
+      duration: 0

@@ -1,0 +1,20 @@
+name: ci
+
+on:
+  pull_request:
+  push: { branches: [main] }
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    strategy:
+      matrix: { platform: [ubuntu-latest, macos-latest] }
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+      - run: just check

@@ -1,10 +1,10 @@
-package gohttpdisk
+package httpdisk
 
 import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -13,61 +13,71 @@ import (
 	"strings"
 )
 
+// DefaultIgnoreParams are query/form params that are dropped when calculating
+// cache keys. These typically vary from request to request, which would
+// otherwise fragment the cache. Set Options.IgnoreParams to override, or to an
+// empty (non-nil) slice to disable.
+var DefaultIgnoreParams = []string{
+	"_",
+	"access_token",
+	"api_key",
+	"apikey",
+	"auth_token",
+	"key",
+	"nonce",
+	"sig",
+	"signature",
+	"timestamp",
+	"token",
+}
+
+// bodies at least this long are hashed instead of being included verbatim
+const maxBodyLen = 50
+
+const formContentType = "application/x-www-form-urlencoded"
+
 // a key in the cache
 type CacheKey struct {
 	Request *http.Request
+
+	// query params to ignore when calculating the key
+	IgnoreParams []string
 }
 
-func NewCacheKey(req *http.Request) (*CacheKey, error) {
+func NewCacheKey(req *http.Request, ignoreParams []string) (*CacheKey, error) {
 	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
 		return nil, fmt.Errorf("http/https required (%s)", req.URL.String())
 	}
 	if req.URL.Host == "" {
 		return nil, fmt.Errorf("host required (%s)", req.URL.String())
 	}
-	return &CacheKey{req}, nil
+	return &CacheKey{Request: req, IgnoreParams: ignoreParams}, nil
 }
 
 // Key calculates a canonical cache key for the request based on the http
 // method, the normalized URL, and the request body if present. The key can be
 // quite long since it contains the request body.
 func (cacheKey *CacheKey) Key() string {
-	method := strings.ToUpper(cacheKey.Request.Method)
+	req := cacheKey.Request
+
+	method := strings.ToUpper(req.Method)
 	if method == "" {
 		method = "GET"
 	}
+	scheme := strings.ToLower(req.URL.Scheme)
 
-	scheme := strings.ToLower(cacheKey.Request.URL.Scheme)
-	port := cacheKey.Request.URL.Port()
-	if port == "" {
-		port = ports[scheme]
+	key := []string{method, " ", scheme, "://", strings.ToLower(req.URL.Hostname())}
+	if port := req.URL.Port(); port != "" && port != defaultPorts[scheme] {
+		key = append(key, ":", port)
 	}
-
-	path := cacheKey.Request.URL.Path
-	if path == "" {
-		path = "/"
-	}
-
-	key := make([]string, 12)
-	key = append(key, method)
-	key = append(key, " ")
-	key = append(key, scheme)
-	key = append(key, "://")
-	key = append(key, strings.ToLower(cacheKey.Request.URL.Hostname()))
-	if port != ports[scheme] {
-		key = append(key, ":")
-		key = append(key, port)
-	}
-	if path != "/" {
+	if path := req.URL.EscapedPath(); path != "" && path != "/" {
 		key = append(key, path)
 	}
-	if query := cacheKey.Request.URL.Query(); len(query) > 0 {
-		key = append(key, "?")
-		key = append(key, querykey(query))
+	if query := cacheKey.canonicalQuery(req.URL.RawQuery); query != "" {
+		key = append(key, "?", query)
 	}
-	if cacheKey.Request.GetBody != nil {
-		key = append(key, " ")
-		key = append(key, bodykey(cacheKey.Request))
+	if body, ok := cacheKey.bodykey(); ok {
+		key = append(key, " ", body)
 	}
 
 	return strings.Join(key, "")
@@ -78,64 +88,97 @@ func (cacheKey *CacheKey) Digest() string {
 	return md5String(cacheKey.Key())
 }
 
-// Path returns the path on disk for this request.
-func (cacheKey *CacheKey) Diskpath(noHosts bool) string {
-	paths := []string{}
-
-	if !noHosts {
-		// Host dir
-		paths = append(paths, normalizeHostForPath(cacheKey.Request.URL.Hostname()))
-	}
-
-	// Key
-	key := cacheKey.Digest()
-	paths = append(paths, key[0:2])
-	paths = append(paths, key[2:4])
-	paths = append(paths, key[4:])
-
-	return filepath.Join(paths...)
+// Diskpath returns the relative path on disk for this request.
+func (cacheKey *CacheKey) Diskpath() string {
+	digest := cacheKey.Digest()
+	return filepath.Join(hostdir(cacheKey.Request.URL.Hostname()), digest[0:3], digest[3:])
 }
 
 //
 // helpers
 //
 
-var ports = map[string]string{
+var defaultPorts = map[string]string{
 	"http":  "80",
 	"https": "443",
 }
 
-func querykey(query url.Values) string {
-	for key := range query {
-		sort.Strings(query[key])
+// Calculate the cache key segment for the request body. Form bodies are
+// canonicalized, long bodies are hashed. The bool is false if this request
+// has no body at all.
+func (cacheKey *CacheKey) bodykey() (string, bool) {
+	req := cacheKey.Request
+	if req.GetBody == nil {
+		return "", false
 	}
-	return query.Encode() // note: sorts by key
-}
-
-func bodykey(req *http.Request) string {
 	reader, err := req.GetBody()
 	if err != nil {
-		return ""
+		return "", false
 	}
 	defer reader.Close()
-	data, err := ioutil.ReadAll(reader)
+	data, err := io.ReadAll(reader)
 	if err != nil {
+		return "", false
+	}
+	body := string(data)
+
+	if req.Header.Get("Content-Type") == formContentType {
+		// canonicalized away to nothing? then there's no body segment
+		body = cacheKey.canonicalQuery(body)
+		return body, body != ""
+	}
+	if len(body) >= maxBodyLen {
+		return md5String(body), true
+	}
+	return body, true
+}
+
+// Sort query params and drop the ones we've been asked to ignore. Note that we
+// sort the raw "key=value" strings without decoding them, to match the ruby
+// httpdisk gem.
+func (cacheKey *CacheKey) canonicalQuery(query string) string {
+	if query == "" {
 		return ""
 	}
-	return string(data)
+
+	parts := strings.Split(query, "&")
+	sort.Strings(parts)
+
+	if len(cacheKey.IgnoreParams) > 0 {
+		ignore := map[string]bool{}
+		for _, param := range cacheKey.IgnoreParams {
+			ignore[url.QueryEscape(param)] = true
+		}
+		kept := parts[:0]
+		for _, part := range parts {
+			name, _, _ := strings.Cut(part, "=")
+			if !ignore[name] {
+				kept = append(kept, part)
+			}
+		}
+		parts = kept
+	}
+
+	return strings.Join(parts, "&")
 }
 
 var (
-	hostWwwRe   = regexp.MustCompile(`^(www\.)`)
-	hostCharsRe = regexp.MustCompile("[^A-Za-z0-9._-]+")
+	hostWwwRe   = regexp.MustCompile(`^www\.`)
+	hostCharsRe = regexp.MustCompile(`[^a-z0-9._-]+`)
+	hostDotsRe  = regexp.MustCompile(`\.{2,}`)
 )
 
-// Normalize a hostname. Collisions are ok because the rest of the path is an
-// md5 checksum.
-func normalizeHostForPath(s string) string {
-	s = hostWwwRe.ReplaceAllString(s, "")
-	s = hostCharsRe.ReplaceAllString(s, "")
-	return s
+// Calculate a nice directory name from the hostname. Collisions are ok because
+// the rest of the path is an md5 checksum.
+func hostdir(host string) string {
+	host = strings.ToLower(host)
+	host = hostWwwRe.ReplaceAllString(host, "")
+	host = hostCharsRe.ReplaceAllString(host, "")
+	host = hostDotsRe.ReplaceAllString(host, ".")
+	if host == "" {
+		host = "any"
+	}
+	return host
 }
 
 func md5String(text string) string {

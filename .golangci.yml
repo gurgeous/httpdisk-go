@@ -1,0 +1,49 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    # this list was extracted from other popular projects
+    - asciicheck # checks that your code does not contain non-ASCII identifiers
+    - bodyclose # checks whether HTTP response body is closed successfully
+    - copyloopvar # detects places where loop variables are copied (Go 1.22+)
+    - durationcheck # checks for two durations multiplied together
+    - errcheck # checks for unchecked errors
+    - exhaustive # checks exhaustiveness of enum-like switch statements
+    - goconst # finds repeated strings that could be constants
+    - gomoddirectives # manages 'replace', 'retract', and 'excludes' in go.mod
+    - goprintffuncname # checks that printf-like functions are named with f at the end
+    - gosec # inspects code for common security problems
+    - misspell # finds commonly misspelled English words
+    - modernize # use modern language and lib features.
+    - nakedret # checks for naked returns in long functions
+    - nestif # reports deeply nested if statements
+    - nilerr # finds the code that returns nil even if it checks that the error is not nil
+    - nolintlint # reports ill-formed or insufficient nolint directives
+    - prealloc # suggests preallocating slices when safe
+    - revive # configurable general-purpose style and correctness linter
+    - tparallel # checks top-level tests and subtests for proper parallel usage
+    - unconvert # removes unnecessary type conversions
+    - unparam # reports unused function parameters
+    - whitespace # detects unnecessary leading/trailing blank lines
+
+  exclusions:
+    generated: lax
+    presets: [comments, common-false-positives, std-error-handling]
+    rules:
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true # default switch works even if some enums not present
+    gosec:
+      {
+        confidence: low,
+        severity: low,
+        # md5 is not a security choice here, it's the ruby httpdisk cache key
+        excludes: [G301, G306, G401, G501],
+      }
+
+issues: { max-issues-per-linter: 0, max-same-issues: 0 }
+formatters:
+  enable: [gofumpt, goimports]
+  exclusions: { generated: lax }
+run: { tests: false } # don't run on test files
